@@ -143,7 +143,7 @@ function renderRecord(rec) {
   if (isProcessing) { html += `<div class="processing-banner"><span class="icon">⏳</span><div><strong>Processing in Progress:</strong> Your ${f(rec.loanType)} application is currently being reviewed. This usually takes approximately <strong>${processingTime}</strong> from this stage.</div></div>`; }
   else if (isApproved) { html += `<div class="approved-banner"><span class="icon">✅</span><div><strong>Approved - Awaiting Disbursement:</strong> Your ${f(rec.loanType)} application has been approved! Funds will be disbursed to your account shortly.</div></div>`; }
   else if (isDisbursed) { html += `<div class="disbursed-banner"><span class="icon">💰</span><div><strong>Funds Disbursed:</strong> Your ${f(rec.loanType)} funds have been successfully disbursed. Please check your account for the credited amount.</div></div>`; }
-  html += `<div class="action-bar"><button class="btn btn-pdf" id="pdfBtn" onclick="downloadPDF()">📄 Download PDF</button><button class="btn btn-print" onclick="window.print()">🖨️ Print</button></div><div class="doc-body" id="docBody">`;
+  html += `<div class="action-bar"><button class="btn btn-pdf" id="pdfBtn" onclick="downloadPDF()">📄 Download PDF</button><button class="btn btn-print" onclick="printDoc()">🖨️ Print</button></div><div class="doc-body" id="docBody">`;
   html += `<div class="sec-title">Application Details</div><div class="info-grid">
       <div class="info-item"><label>Application ID</label><span>${f(rec.appId)}</span></div>
       <div class="info-item"><label>Submission Date</label><span>${f(rec.submitted)}</span></div>
@@ -201,12 +201,63 @@ function renderRecord(rec) {
   document.getElementById('docContent').style.display = 'block';
 }
 
+function isInAppBrowser() {
+  return /FBAN|FBAV|Instagram|Line\/|WhatsApp|Messenger|Twitter/i.test(navigator.userAgent || '');
+}
+function isIOS() {
+  return /iP(hone|ad|od)/.test(navigator.userAgent || '');
+}
+
+function printDoc() {
+  if (isInAppBrowser()) {
+    alert('Printing isn\'t supported inside this app\'s built-in browser.\n\nPlease open this page in Safari or Chrome, then use Print or "Download PDF" instead.');
+    return;
+  }
+  window.print();
+}
+
 function downloadPDF() {
+  if (isInAppBrowser()) {
+    alert('Downloads don\'t work reliably inside this app\'s built-in browser.\n\nPlease open this page in Safari or Chrome (tap the ⋮ or "Open in Browser" option), then try again.');
+    return;
+  }
+
   const btn = document.getElementById('pdfBtn'); btn.disabled = true; btn.textContent = '⏳ Generating...';
-  html2pdf().set({ margin:[10,10,10,10], filename:(APP_ID || 'LoanApplication') + '.pdf', image:{type:'jpeg',quality:0.98}, html2canvas:{scale:2,useCORS:true}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'} })
-    .from(document.getElementById('docBody')).save()
-    .then(() => { btn.disabled=false; btn.textContent='📄 Download PDF'; })
-    .catch(err => { alert('PDF error: '+err.message); btn.disabled=false; btn.textContent='📄 Download PDF'; });
+
+  // iOS Safari ignores <a download> and blocks pop-ups opened *after* async work.
+  // Opening a blank tab synchronously (inside this click handler) avoids that.
+  const iOS = isIOS();
+  let pdfWindow = null;
+  if (iOS) pdfWindow = window.open('', '_blank');
+
+  const filename = (APP_ID || 'LoanApplication') + '.pdf';
+
+  html2pdf().set({
+    margin: [10,10,10,10],
+    filename: filename,
+    image: { type:'jpeg', quality:0.98 },
+    html2canvas: { scale: window.devicePixelRatio > 1 ? 2 : 1.5, useCORS:true },
+    jsPDF: { unit:'mm', format:'a4', orientation:'portrait' }
+  })
+    .from(document.getElementById('docBody'))
+    .toPdf().get('pdf')
+    .then(pdf => {
+      const url = URL.createObjectURL(pdf.output('blob'));
+      if (iOS && pdfWindow) {
+        pdfWindow.location.href = url; // opens the PDF; user taps Share > Save to Files
+      } else {
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      btn.disabled = false; btn.textContent = '📄 Download PDF';
+    })
+    .catch(err => {
+      if (pdfWindow) pdfWindow.close();
+      alert('PDF error: ' + err.message + '\n\nIf you are inside WhatsApp, Facebook, or another app\'s browser, please open this page in Safari or Chrome directly and try again.');
+      btn.disabled = false; btn.textContent = '📄 Download PDF';
+    });
 }
 </script>
 </body>
