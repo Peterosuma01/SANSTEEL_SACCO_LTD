@@ -114,20 +114,59 @@
     }
     return null;
   }
-  function printStatement() { window.print(); }
+  function isInAppBrowser() {
+    return /FBAN|FBAV|Instagram|Line\/|WhatsApp|Messenger|Twitter/i.test(navigator.userAgent || '');
+  }
+  function isIOS() {
+    return /iP(hone|ad|od)/.test(navigator.userAgent || '');
+  }
+  function printStatement() {
+    if (isInAppBrowser()) {
+      alert('Printing isn\'t supported inside this app\'s built-in browser.\n\nPlease open this page in Safari or Chrome, then use Print or "Download PDF" instead.');
+      return;
+    }
+    window.print();
+  }
   function downloadPDF() {
+    if (isInAppBrowser()) {
+      alert('Downloads don\'t work reliably inside this app\'s built-in browser.\n\nPlease open this page in Safari or Chrome (tap the ⋮ or "Open in Browser" option), then try again.');
+      return;
+    }
     const memberID = document.getElementById('memberID').value.trim();
     const year = document.getElementById('yearSelect').value;
     const period = document.getElementById('period').value;
     if (!memberID) { alert('Please enter Member ID before downloading.'); return; }
     const filename = `Statement_${memberID}_${year}_${period.replace(/\s+/g,'_')}.pdf`;
-    const options = { margin: [10,10,10,10], filename, image: { type:'jpeg', quality:0.98 }, html2canvas: { scale:2, useCORS:true }, jsPDF: { unit:'mm', format:'a4', orientation:'portrait' } };
+    const options = { margin: [10,10,10,10], filename, image: { type:'jpeg', quality:0.98 }, html2canvas: { scale: window.devicePixelRatio > 1 ? 2 : 1.5, useCORS:true }, jsPDF: { unit:'mm', format:'a4', orientation:'portrait' } };
     const btn = document.querySelector('.download-btn');
     const orig = btn.innerHTML;
     btn.innerHTML = '⏳ Generating...'; btn.disabled = true;
-    html2pdf().set(options).from(document.getElementById('output')).save()
-      .then(() => { btn.innerHTML = orig; btn.disabled = false; })
-      .catch(err => { alert('PDF error: ' + err.message); btn.innerHTML = orig; btn.disabled = false; });
+
+    // iOS Safari ignores <a download> and blocks pop-ups opened *after* async work.
+    // Opening a blank tab synchronously (inside this click handler) avoids that.
+    const iOS = isIOS();
+    let pdfWindow = null;
+    if (iOS) pdfWindow = window.open('', '_blank');
+
+    html2pdf().set(options).from(document.getElementById('output'))
+      .toPdf().get('pdf')
+      .then(pdf => {
+        const url = URL.createObjectURL(pdf.output('blob'));
+        if (iOS && pdfWindow) {
+          pdfWindow.location.href = url; // opens the PDF; user taps Share > Save to Files
+        } else {
+          const a = document.createElement('a');
+          a.href = url; a.download = filename;
+          document.body.appendChild(a); a.click(); a.remove();
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        btn.innerHTML = orig; btn.disabled = false;
+      })
+      .catch(err => {
+        if (pdfWindow) pdfWindow.close();
+        alert('PDF error: ' + err.message + '\n\nIf you are inside WhatsApp, Facebook, or another app\'s browser, please open this page in Safari or Chrome directly and try again.');
+        btn.innerHTML = orig; btn.disabled = false;
+      });
   }
   function generateStatement() {
     const memberID = document.getElementById('memberID').value.trim();
